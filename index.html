@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#f7f5f0">
-<title>Domaine du Grand Caugy — Gestion événementielle V10</title>
+<title>Domaine du Grand Caugy — Gestion événementielle V11</title>
 <style>
 :root{--bg:#f7f3ec;--paper:#fffdf9;--ink:#40352e;--muted:#82756b;--line:#e9dfd3;--gold:#b8794d;--copper:#b8794d;--terracotta:#c88765;--green:#e4e9dc;--yellow:#f2e7c8;--orange:#f2dfd2;--red:#eedbd7;--shadow:0 12px 35px #49372b0c}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
@@ -63,6 +63,14 @@ button{transition:background .15s ease,border-color .15s ease}.paymentTable th{c
 .payment-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}.payment-toolbar input{flex:1;min-width:230px}
 .brand:after{content:"";display:block;width:42px;height:1px;background:#d8c5b2;margin:17px auto 0}
 @media(max-width:800px){.payment-summary{grid-template-columns:1fr}.brand{text-align:left}.brandlogo{width:145px;margin:0 0 6px}.brand:after{display:none}}
+
+#cloudGate{position:fixed;inset:0;z-index:10000;background:#f7f3ec;display:grid;place-items:center;padding:20px}
+.cloud-card{width:min(440px,100%);background:#fffdf9;border:1px solid #e9dfd3;border-radius:16px;padding:28px;box-shadow:0 12px 35px #49372b12}
+.cloud-card h2{font:28px Georgia,serif;color:#594438;margin:8px 0}
+.cloud-card p{color:#82756b;font-size:13px}
+.cloud-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px}
+.cloud-actions button{flex:1}
+#cloudStatus{font-size:11px;color:#82756b;margin-top:8px}
 </style></head>
 <body>
 <div class="app">
@@ -74,7 +82,7 @@ button{transition:background .15s ease,border-color .15s ease}.paymentTable th{c
 <button type="button" class="nav" data-page="payments"><span aria-hidden="true">€</span>Paiements</button>
 <button type="button" class="nav" data-page="brochures"><span aria-hidden="true">▤</span>Brochures & tarifs</button>
 <button type="button" class="nav" data-page="documents"><span aria-hidden="true">▧</span>Documents</button>
-</nav><div class="sidefoot">V10 · Domaine du Grand Caugy · données locales</div>
+</nav><div class="sidefoot"><div id="cloudStatus">Connexion sécurisée</div>V11 · Domaine du Grand Caugy · synchronisation en ligne</div>
 </aside>
 <main>
 <section id="calendar">
@@ -97,10 +105,63 @@ button{transition:background .15s ease,border-color .15s ease}.paymentTable th{c
 </section>
 </main></div>
 <div id="modal" class="modal hidden"><div class="modalbox"><div class="modalhead"><h2 id="modalTitle">Nouveau client</h2><button id="closeModal">✕</button></div><div id="modalBody"></div></div></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script>
 const $=s=>document.querySelector(s), months=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
-let data=JSON.parse(localStorage.getItem('gc-data')||'null')||{clients:[],events:[],docs:[]};let year=new Date().getFullYear(),month=new Date().getMonth();
-function save(){localStorage.setItem('gc-data',JSON.stringify(data))}
+const SUPABASE_URL='https://hspltgoslvdxrppxpvek.supabase.co';
+const SUPABASE_PUBLISHABLE_KEY='sb_publishable_5-xNpUpxjCnXmOKUvcWcrw_Ea2TUkM5';
+if(!window.supabase || !window.supabase.createClient){
+  document.addEventListener('DOMContentLoaded',()=>{
+    const gate=document.createElement('div');
+    gate.id='cloudGate';
+    gate.innerHTML='<div class="cloud-card"><h2>Connexion indisponible</h2><p>La bibliothèque de connexion Supabase ne s’est pas chargée. Vérifiez votre connexion Internet puis rechargez cette page.</p></div>';
+    document.body.append(gate);
+  });
+  throw new Error('Bibliothèque Supabase non chargée');
+}
+const sbClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+let data=JSON.parse(localStorage.getItem('gc-data')||'null')||{clients:[],events:[],docs:[],brochures:{}};
+let year=new Date().getFullYear(),month=new Date().getMonth(),cloudSession=null,cloudQueue=Promise.resolve(),cloudReady=false;
+function save(){
+  localStorage.setItem('gc-data',JSON.stringify(data));
+  if(!cloudSession||!cloudReady)return;
+  const snapshot=JSON.parse(JSON.stringify(data));
+  cloudQueue=cloudQueue.then(async()=>{
+    const {error}=await sbClient.from('app_data').upsert({id:'main',payload:snapshot,updated_at:new Date().toISOString()});
+    if(error){console.error('Erreur de synchronisation Supabase:',error);setSyncStatus('Erreur de synchronisation — vérifiez votre connexion');throw error;}
+    setSyncStatus('Synchronisé · '+new Date().toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}));
+  }).catch(err=>console.error(err));
+}
+function setSyncStatus(message){const el=document.getElementById('cloudStatus');if(el)el.textContent=message}
+function showCloudGate(message='Connectez-vous pour accéder aux données du domaine.'){
+  let gate=document.getElementById('cloudGate');
+  if(!gate){gate=document.createElement('div');gate.id='cloudGate';gate.innerHTML=`<div class="cloud-card"><div class="eyebrow">DOMAINE DU GRAND CAUGY</div><h2>Accès à l'application</h2><p id="cloudMessage"></p><form id="cloudLogin"><label>Adresse e-mail commune</label><input name="email" type="email" autocomplete="username" required><label>Mot de passe</label><input name="password" type="password" autocomplete="current-password" required minlength="8"><div class="cloud-actions"><button class="primary" type="submit">Se connecter</button><button type="button" id="cloudSignup">Créer le compte commun</button></div></form><p class="muted" id="cloudFeedback">Utilisez le même e-mail et mot de passe sur vos appareils.</p></div>`;document.body.append(gate);
+    document.getElementById('cloudLogin').onsubmit=async ev=>{ev.preventDefault();const f=new FormData(ev.target);const btn=ev.target.querySelector('button[type=submit]');btn.disabled=true;document.getElementById('cloudFeedback').textContent='Connexion…';const {error}=await sbClient.auth.signInWithPassword({email:f.get('email'),password:f.get('password')});btn.disabled=false;document.getElementById('cloudFeedback').textContent=error?error.message:'Connexion en cours…';};
+    document.getElementById('cloudSignup').onclick=async()=>{const f=new FormData(document.getElementById('cloudLogin'));const email=f.get('email'),password=f.get('password');if(!email||!password||String(password).length<8){document.getElementById('cloudFeedback').textContent='Saisissez un e-mail et un mot de passe d’au moins 8 caractères.';return;}const {error}=await sbClient.auth.signUp({email,password});document.getElementById('cloudFeedback').textContent=error?error.message:'Compte créé. Si la confirmation par e-mail est activée, ouvrez le message reçu puis reconnectez-vous.';};
+  }
+  document.getElementById('cloudMessage').textContent=message;gate.style.display='grid';
+}
+function hideCloudGate(){const gate=document.getElementById('cloudGate');if(gate)gate.style.display='none'}
+async function activateCloudSession(session){
+  cloudSession=session;cloudReady=false;showCloudGate('Chargement sécurisé des données du domaine…');
+  const {data:row,error}=await sbClient.from('app_data').select('payload').eq('id','main').maybeSingle();
+  if(error){showCloudGate('La connexion fonctionne, mais la table de données n’est pas encore configurée. Exécutez le script SQL fourni avec la V11 dans Supabase.');document.getElementById('cloudFeedback').textContent=error.message;return;}
+  if(row&&row.payload){data={clients:[],events:[],docs:[],brochures:{},...row.payload};localStorage.setItem('gc-data',JSON.stringify(data));}
+  else {
+    const local=JSON.parse(localStorage.getItem('gc-data')||'null');
+    data=local||{clients:[],events:[],docs:[],brochures:{}};
+    const {error:upsertError}=await sbClient.from('app_data').upsert({id:'main',payload:data,updated_at:new Date().toISOString()});
+    if(upsertError){showCloudGate('Impossible d’initialiser les données en ligne.');document.getElementById('cloudFeedback').textContent=upsertError.message;return;}
+  }
+  cloudReady=true;hideCloudGate();setSyncStatus('Synchronisé');fillYears();drawCalendar();drawClients();drawPayments();drawDocs();drawBrochures();
+}
+async function startCloud(){
+  showCloudGate();
+  const {data:{session},error}=await sbClient.auth.getSession();
+  if(error){document.getElementById('cloudFeedback').textContent=error.message;return;}
+  if(session)await activateCloudSession(session);
+  sbClient.auth.onAuthStateChange((event,session)=>{if(event==='SIGNED_OUT'){cloudSession=null;cloudReady=false;showCloudGate();}else if(event==='SIGNED_IN'&&session&&!cloudReady){setTimeout(()=>activateCloudSession(session),0);}});
+}
 function show(page){document.querySelectorAll('main section').forEach(s=>s.classList.add('hidden'));$('#'+page).classList.remove('hidden');document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.page===page));if(page==='calendar')drawCalendar();if(page==='clients')drawClients();if(page==='documents')drawDocs();if(page==='brochures')drawBrochures();if(page==='payments')drawPayments()}
 document.querySelectorAll('.nav').forEach(b=>b.onclick=()=>show(b.dataset.page));
 function fillYears(){
@@ -197,5 +258,5 @@ $('#searchPayments').oninput=drawPayments;
 function esc(x){return String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 $('#addDoc').onclick=()=>{modal('Ajouter un document',`<form id="docForm"><label>Nom du document</label><input name="name" required placeholder="Ex. Liste des traiteurs"><label>Catégorie</label><select name="cat"><option>Informations du domaine</option><option>Prestataires</option><option>Informations techniques</option><option>Plans et accès</option><option>Administratif</option></select><p style="margin-top:16px"><button class="primary">Ajouter</button></p></form>`);$('#docForm').onsubmit=e=>{e.preventDefault();data.docs.push(Object.fromEntries(new FormData(e.target)));save();close();drawDocs()}}
 function drawDocs(){$('#docList').innerHTML=(data.docs.length?data.docs:[{name:'Informations du domaine',cat:'À compléter'},{name:'Répertoire des prestataires',cat:'À compléter'},{name:'Plans et accès',cat:'À compléter'},{name:'Informations techniques',cat:'À compléter'}]).map(d=>`<div class="docitem"><b>${esc(d.name)}</b><p class="muted">${esc(d.cat)}</p></div>`).join('')}
-fillYears();drawCalendar();drawDocs();
+fillYears();drawCalendar();drawDocs();startCloud();
 </script></body></html>
